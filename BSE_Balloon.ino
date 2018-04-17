@@ -37,7 +37,7 @@
   {
 //    unsigned char system_video_in=NULL;  
 
-    pinMode(8, OUTPUT);          // sets the digital pin 13 as output
+    pinMode(8, OUTPUT);          // sets the digital pin 8 as output
 
     digitalWrite(8, LOW);
 
@@ -105,8 +105,12 @@
     }
     // if the file isn't open, display error message:
     else {
-      Serial.println(dataString);
-      Serial.println("txt err");
+      //Serial.println(dataString);
+      //Serial.println("txt err");
+      int sensorValue = analogRead(A2);
+      // print out the value you read:
+      Serial.println(sensorValue);
+      delay(1);        // delay in between reads for stability
     }  
 
     // OSD formatting
