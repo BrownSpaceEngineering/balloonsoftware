@@ -24,24 +24,33 @@
   const byte masterOutSlaveIn = MOSI;
   const byte masterInSlaveOut = MISO;
   const byte slaveClock = SCK;
-  const byte osdReset = 0;
   const int chipSelect = 4; // chip select pin for SD card
 
   SFE_BMP180 pressure;
   double baseline; // baseline pressure
+  unsigned long curr_time;
 
- // MAX7456 OSD(osdChipSelect);
+  boolean deployed = false; // Indicating the panel isn't deployed yet
+  boolean printed = false; // Indicating whether it's been printed that the deploy has happened
+
 
 // Hardware Setup
   void setup() 
   {
-//    unsigned char system_video_in=NULL;  
-
-    pinMode(8, OUTPUT);          // sets the digital pin 8 as output
-
-    digitalWrite(8, LOW);
 
     Serial.begin(9600); // Begin serial communication (9600 baud)
+
+    //pinMode(SS_PIN, OUTPUT);
+
+    Serial.println("Program started");
+
+    pinMode(10, OUTPUT);
+
+    // sets the digital pin 10 as output. This will be used to trigger the MOSFET
+    pinMode(9, OUTPUT);
+    
+    digitalWrite(9, LOW); //set pin originally to low so flaps are originally not deployed
+    analogWrite(9, 0);
     
     Serial.println("REBOOT");
     if (pressure.begin()) // initialize sensor
@@ -62,42 +71,51 @@
     // Initialize the SPI connection:
     SPI.begin();
     SPI.setClockDivider( SPI_CLOCK_DIV2 );      // Must be less than 10MHz.
-    baseline = getPressure();
-    // Initialize the MAX7456 OSD:
-  //  OSD.begin();
-  //  OSD.setSwitchingTime(5);     // Use NTSC with default area.
-    
-  //  system_video_in = OSD.videoSystem(); 
-  //  if(NULL != system_video_in)
-  //  {
-  //      OSD.setDefaultSystem(system_video_in) ;
-  //  }
-  //  else
-  //  {
-  //      OSD.setDefaultSystem(MAX7456_NTSC) ;
-  //  }
-    
-  //  OSD.display();  // Activate the text display.
-    
+    baseline = getPressure();    
   }
 
 // Main Code
   void loop() 
   {
+    curr_time = millis();
     // Serial.println(freeMemory()); //use to check for memory leaks
     String dataString = ""; // for writing to SD
     double a,P,T;
     P = getPressure();
     T = getTemp();
+    int solarMilliVolts = analogRead(A2) * (5000 / 1023);
     baseline = 1013.25; // baseline pressure for sea level, in millibars
     a = pressure.altitude(P,baseline); // altitude in meters
-    
+   
     dataString += a;
     dataString += " ";
     dataString += T;
+    dataString += " ";
+    dataString += solarMilliVolts;
+
+    // 36000000 is the actual deploy time
+      if(((a > 15500) || (curr_time > 10000)) && !deployed) {
+      int i = 100;
+      while(i < 255) {
+        analogWrite(9, i);
+        delay(50); 
+        i += 50;         
+      }
+      delay(1000);
+      i = 0;
+      analogWrite(9, i); 
+      deployed = true;
+      Serial.println("!!!!!! DEPLOY JUST HAPPENED !!!!!!!!!!!!!!!");
+      }
+    
     File dataFile = SD.open("datalog.txt", FILE_WRITE);
     // if the file is available, write to it:
     if (dataFile) {
+      if(deployed && !printed) {
+      dataFile.println("SOLAR DEPLOYED APPROX 1 SECOND EARLIER");
+      Serial.println("SOLAR DEPLOYED APPROX 1 SECOND EARLIER");
+      printed = true;
+      }
       dataFile.println(dataString);
       dataFile.close();
       // print to the serial port too:
@@ -105,25 +123,14 @@
     }
     // if the file isn't open, display error message:
     else {
-      //Serial.println(dataString);
-      //Serial.println("txt err");
-      int sensorValue = analogRead(A2);
-      // print out the value you read:
-      Serial.println(sensorValue);
-      delay(1);        // delay in between reads for stability
-    }  
-
-    // OSD formatting
-//    OSD.setCursor(0,-1);
-//    OSD.print("Alt: ");
-//    OSD.setCursor(10,-1);
-//    OSD.print(a);
-//    OSD.setCursor(0,-2);
-//    OSD.print("Temp: ");
-//    OSD.setCursor(10,-2);
-//    OSD.print(T);
-//    delay(1000); // delay for 1 second
-  } 
+      if(deployed && !printed) {
+      Serial.println("SOLAR DEPLOYED APPROX 1 SECOND EARLIER");
+      printed = true;
+      }
+      Serial.println(dataString);
+      Serial.println("txt err");
+     }
+     }
 
 // Helper functions
 double getTemp()
