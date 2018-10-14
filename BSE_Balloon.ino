@@ -1,22 +1,30 @@
-
 /*
  * Final balloon sketch.
  * Handles OSD shield, SD shield, and temperature/altitude sensor
  * 
  * Created: 3/21/2017
- * Last modified: 10/19/2017
+ * Last modified: 10/14/2018
  * 
- * Author: Nishanth Kumar (NishanthJKumar)
+ * Author: Nishanth J. Kumar (NishanthJKumar)
  * Based on code by:
  * David Schurman (dschurman)
  */
 
 // Included Libraries
-  //#include <MemoryFree.h> // used to test for memory leaks
   #include <SPI.h> // Serial Peripheral Interface, used to communicate with shields
-//  #include <MAX7456.h> // On-Screen-Display (OSD) shield library
-  #include <SFE_BMP180.h> // Altitide/Temperature sensor library
   #include <SD.h> // SD card library
+  #include <Adafruit_Sensor.h>
+  #include <Adafruit_BME280.h>
+
+#define BME_SCK 13
+#define BME_MISO 12
+#define BME_MOSI 11
+#define BME_CS 10
+
+#define SEALEVELPRESSURE_HPA (1013.25)
+
+Adafruit_BME280 bme; // I2C
+
 
 // Global variables 
 // These define serial communication between Arduino and shields
@@ -26,8 +34,8 @@
   const byte slaveClock = SCK;
   const int chipSelect = 4; // chip select pin for SD card
 
-  SFE_BMP180 pressure;
-  double baseline; // baseline pressure
+//  SFE_BMP180 pressure;
+//  double baseline; // baseline pressure
   unsigned long curr_time;
 
   boolean deployed = false; // Indicating the panel isn't deployed yet
@@ -40,11 +48,16 @@
 
     Serial.begin(9600); // Begin serial communication (9600 baud)
 
-    //pinMode(SS_PIN, OUTPUT);
+    bool status;
+    
+    // default settings
+    // (you can also pass in a Wire library object like &Wire2)
+    status = bme.begin();  
 
     Serial.println("Program started");
 
     pinMode(10, OUTPUT);
+    digitalWrite(10, HIGH);
 
     // sets the digital pin 10 as output. This will be used to trigger the MOSFET
     pinMode(9, OUTPUT);
@@ -53,48 +66,48 @@
     analogWrite(9, 0);
     
     Serial.println("REBOOT");
-    if (pressure.begin()) // initialize sensor
-    Serial.println("BMP180 init success");
+    if (status) // initialize sensor
+    Serial.println("BME280 init success");
     else
     {
-      Serial.println("BMP180 init fail (disconnected?)\n\n");
+      Serial.println("BME280 init fail (disconnected?)\n\n");
       while(1); // Pause forever.
     }
     
     Serial.print("Initializing SD card...");
     // see if the card is present and can be initialized:
-    if (!SD.begin(chipSelect)) {
+    if (!SD.begin(4)) {
       Serial.println("Card failed, or not present");
       // don't do anything more
     }
     Serial.println("card initialized.");
     // Initialize the SPI connection:
     SPI.begin();
-    SPI.setClockDivider( SPI_CLOCK_DIV2 );      // Must be less than 10MHz.
-    baseline = getPressure();    
+    SPI.setClockDivider( SPI_CLOCK_DIV2 );      // Must be less than 10MHz.  
   }
 
 // Main Code
   void loop() 
   {
-    curr_time = millis();
+    curr_time = millis(); // tine value in millis
     // Serial.println(freeMemory()); //use to check for memory leaks
     String dataString = ""; // for writing to SD
     double a,P,T;
-    P = getPressure();
-    T = getTemp();
-    int solarMilliVolts = analogRead(A2) * (5000 / 1023);
-    baseline = 1013.25; // baseline pressure for sea level, in millibars
-    a = pressure.altitude(P,baseline); // altitude in meters
+    P = bme.readPressure() / 100.0F;
+    T = bme.readTemperature();
+    int solarMilliVolts1 = analogRead(A0) * (5000 / 1023);
+    int solarMilliVolts2 = analogRead(A1) * (5000 / 1023);
+    a = bme.readAltitude(SEALEVELPRESSURE_HPA); // altitude in meters
    
     dataString += a;
-    dataString += " ";
+    dataString += ",";
     dataString += T;
-    dataString += " ";
-    dataString += solarMilliVolts;
+    dataString += ",";
+    dataString += solarMilliVolts1;
+    dataString += ",";
+    dataString += solarMilliVolts2;
 
-    // 36000000 is the actual deploy time
-      if(((a > 15500) || (curr_time > 10000)) && !deployed) {
+      if(((a > 10000) || (curr_time > 3333000)) && !deployed) {
       int i = 100;
       while(i < 255) {
         analogWrite(9, i);
@@ -107,8 +120,10 @@
       deployed = true;
       Serial.println("!!!!!! DEPLOY JUST HAPPENED !!!!!!!!!!!!!!!");
       }
-    
-    File dataFile = SD.open("datalog.txt", FILE_WRITE);
+
+    File dataFile;
+    char filename[] = "datalog.csv";
+    dataFile = SD.open(filename, FILE_WRITE);
     // if the file is available, write to it:
     if (dataFile) {
       if(deployed && !printed) {
@@ -131,70 +146,3 @@
       Serial.println("txt err");
      }
      }
-
-// Helper functions
-double getTemp()
-{
-  char status;
-  double T; 
- 
-  status = pressure.startTemperature();
-    // Wait for the measurement to complete:
-  delay(status);
-  status = pressure.getTemperature(T);
-  T = T*9/5 + 32; // convert to Fahrenheit
-  return(T);
-}
-
-double getPressure()
-{
-  char status;
-  double T, P, p0, a;
-
-  // Must first get a temperature measurement to perform a pressure reading.
-  
-  // Start a temperature measurement:
-  // If request is successful, the number of ms to wait is returned.
-  // If request is unsuccessful, 0 is returned.
-
-  status = pressure.startTemperature();
-  if (status != 0)
-  {
-    // Wait for the measurement to complete:
-
-    delay(status);
-
-    status = pressure.getTemperature(T);
-    if (status != 0)
-    {
-      // Start a pressure measurement:
-      // The parameter is the oversampling setting, from 0 to 3 (highest res, longest wait).
-      // If request is successful, the number of ms to wait is returned.
-      // If request is unsuccessful, 0 is returned.
-
-      status = pressure.startPressure(3);
-      if (status != 0)
-      {
-        // Wait for the measurement to complete:
-        delay(status);
-
-        // Retrieve the completed pressure measurement:
-        // Note that the measurement is stored in the variable P.
-        // Use '&P' to provide the address of P.
-        // Note also that the function requires the previous temperature measurement (T).
-        // (If temperature is stable, you can do one temperature measurement for a number of pressure measurements.)
-        // Function returns 1 if successful, 0 if failure.
-
-        status = pressure.getPressure(P,T);
-        if (status != 0)
-        {
-          return(P);
-        }
-        else Serial.println("error retrieving pressure measurement\n");
-      }
-      else Serial.println("error starting pressure measurement\n");
-    }
-    else Serial.println("error retrieving temperature measurement\n");
-  }
-  else Serial.println("error starting temperature measurement\n");
-}
